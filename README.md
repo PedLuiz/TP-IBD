@@ -1,0 +1,1 @@
+Repositorio dedicado ao trabalho prático da disciplina Introdução a Bando de Dados
