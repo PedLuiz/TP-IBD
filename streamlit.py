@@ -60,51 +60,58 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Funções auxiliares para SQLite
-@st.cache_resource
 def get_connection():
     """Conecta ao banco SQLite"""
     try:
-        conn = sqlite3.connect('importacoes_brasil_2024.db')
+        conn = sqlite3.connect('importacoes_brasil_2024.db', check_same_thread=False)
         return conn
     except Exception as e:
         st.error(f"Erro ao conectar ao banco de dados: {e}")
         return None
 
 @st.cache_data
-def fetch_data(query, _conn):
+def fetch_data(query):
     """Executa query e retorna DataFrame"""
     try:
-        return pd.read_sql_query(query, _conn)
+        conn = sqlite3.connect('importacoes_brasil_2024.db', check_same_thread=False)
+        result = pd.read_sql_query(query, conn)
+        conn.close()
+        return result
     except Exception as e:
         st.error(f"Erro ao executar query: {e}")
         return pd.DataFrame()
 
-@st.cache_data
-def get_basic_stats(_conn):
-    """Retorna estatísticas básicas do banco"""
+def get_basic_stats(sql_filters=""):
+    """Retorna estatísticas básicas do banco com filtros opcionais"""
     try:
+        conn = sqlite3.connect('importacoes_brasil_2024.db', check_same_thread=False)
         stats = {}
         
         # Total de importações
-        total_query = "SELECT COUNT(*) as total FROM Importacoes"
-        stats['total_imports'] = fetch_data(total_query, _conn)['total'].iloc[0]
+        total_query = f"SELECT COUNT(*) as total FROM Importacoes i {sql_filters}"
+        result = pd.read_sql_query(total_query, conn)
+        stats['total_imports'] = result['total'].iloc[0] if not result.empty else 0
         
         # Valor total FOB
-        value_query = "SELECT SUM(VL_FOB) as total_value FROM Importacoes"
-        stats['total_value'] = fetch_data(value_query, _conn)['total_value'].iloc[0]
+        value_query = f"SELECT SUM(i.VL_FOB) as total_value FROM Importacoes i {sql_filters}"
+        result = pd.read_sql_query(value_query, conn)
+        stats['total_value'] = result['total_value'].iloc[0] if not result.empty and result['total_value'].iloc[0] is not None else 0
         
         # Países únicos
-        countries_query = "SELECT COUNT(DISTINCT COD_PAIS) as countries FROM Importacoes"
-        stats['unique_countries'] = fetch_data(countries_query, _conn)['countries'].iloc[0]
+        countries_query = f"SELECT COUNT(DISTINCT i.COD_PAIS) as countries FROM Importacoes i {sql_filters}"
+        result = pd.read_sql_query(countries_query, conn)
+        stats['unique_countries'] = result['countries'].iloc[0] if not result.empty else 0
         
         # NCMs únicos
-        ncm_query = "SELECT COUNT(DISTINCT COD_NCM) as ncms FROM Importacoes"
-        stats['unique_ncms'] = fetch_data(ncm_query, _conn)['ncms'].iloc[0]
+        ncm_query = f"SELECT COUNT(DISTINCT i.COD_NCM) as ncms FROM Importacoes i {sql_filters}"
+        result = pd.read_sql_query(ncm_query, conn)
+        stats['unique_ncms'] = result['ncms'].iloc[0] if not result.empty else 0
         
+        conn.close()
         return stats
     except Exception as e:
         st.error(f"Erro ao obter estatísticas: {e}")
-        return {}
+        return {'total_imports': 0, 'total_value': 0, 'unique_countries': 0, 'unique_ncms': 0}
 
 def format_number(number):
     """Formata números para exibição"""
@@ -117,45 +124,22 @@ def format_number(number):
     else:
         return f"{number:.2f}"
 
-def build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, periodo_opcoes, regioes_opcoes):
-    """Constrói filtros SQL baseados nas seleções do usuário"""
-    filters = []
-    
-    # Filtro de período
-    periodo_key = periodo_opcoes[periodo_selecionado]
-    if periodo_key == "primeiro_semestre":
-        filters.append("i.COD_MES <= 6")
-    elif periodo_key == "segundo_semestre":
-        filters.append("i.COD_MES > 6")
-    elif periodo_key == "primeiro_trimestre":
-        filters.append("i.COD_MES <= 3")
-    elif periodo_key == "segundo_trimestre":
-        filters.append("i.COD_MES BETWEEN 4 AND 6")
-    elif periodo_key == "terceiro_trimestre":
-        filters.append("i.COD_MES BETWEEN 7 AND 9")
-    elif periodo_key == "quarto_trimestre":
-        filters.append("i.COD_MES >= 10")
-    
-    # Filtro de região
-    if regiao_selecionada != "🇧🇷 Brasil Completo":
-        ufs_regiao = regioes_opcoes[regiao_selecionada]
-        ufs_str = "', '".join(ufs_regiao)
-        filters.append(f"uf.SIGLA_UF IN ('{ufs_str}')")
-    
-    # Filtro de valor mínimo
-    if valor_minimo == "Acima de US$ 1.000":
-        filters.append("i.VL_FOB >= 1000")
-    elif valor_minimo == "Acima de US$ 10.000":
-        filters.append("i.VL_FOB >= 10000")
-    elif valor_minimo == "Acima de US$ 100.000":
-        filters.append("i.VL_FOB >= 100000")
-    elif valor_minimo == "Acima de US$ 1.000.000":
-        filters.append("i.VL_FOB >= 1000000")
-    
-    # Retornar string WHERE ou vazia
-    if filters:
-        return "WHERE " + " AND ".join(filters)
-    return ""
+def build_sql_filters(periodo_selecionado):
+    """Constrói filtro SQL simples baseado no período selecionado"""
+    if periodo_selecionado == "1º Semestre":
+        return "WHERE i.COD_MES <= 6"
+    elif periodo_selecionado == "2º Semestre":
+        return "WHERE i.COD_MES > 6"
+    elif periodo_selecionado == "1º Trimestre":
+        return "WHERE i.COD_MES <= 3"
+    elif periodo_selecionado == "2º Trimestre":
+        return "WHERE i.COD_MES BETWEEN 4 AND 6"
+    elif periodo_selecionado == "3º Trimestre":
+        return "WHERE i.COD_MES BETWEEN 7 AND 9"
+    elif periodo_selecionado == "4º Trimestre":
+        return "WHERE i.COD_MES >= 10"
+    else:
+        return ""  # Ano completo - sem filtro
 
 def main():
     # Header principal
@@ -169,118 +153,32 @@ def main():
         </p>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Conectar ao banco
+      # Conectar ao banco para teste
     conn = get_connection()
     if conn is None:
         st.error("❌ Não foi possível conectar ao banco de dados. Verifique se o arquivo 'importacoes_brasil_2024.db' existe.")
         return
-    
-    # Sidebar para filtros
+    conn.close()  # Fechar teste de conexão
+      # Sidebar para filtros
     st.sidebar.markdown('<div class="sidebar-header">🔍 Filtros de Análise</div>', 
                        unsafe_allow_html=True)
     
-    # Obter opções para filtros
-    try:
-        # Meses
-        meses = fetch_data("SELECT DISTINCT COD_MES, NOME_MES FROM Mes ORDER BY COD_MES", conn)
-        mes_options = {f"{row['NOME_MES']} ({row['COD_MES']})": row['COD_MES'] 
-                      for _, row in meses.iterrows()}
-        
-        # Países (top 20 por valor)
-        top_paises = fetch_data("""
-            SELECT p.COD_PAIS, p.NOME_PAIS, SUM(i.VL_FOB) as total_value
-            FROM Importacoes i
-            JOIN Pais p ON i.COD_PAIS = p.COD_PAIS
-            GROUP BY p.COD_PAIS, p.NOME_PAIS
-            ORDER BY total_value DESC
-            LIMIT 20
-        """, conn)
-        
-        # UFs
-        ufs = fetch_data("SELECT DISTINCT COD_UF, NOME_UF FROM UF ORDER BY NOME_UF", conn)
-        uf_options = {f"{row['NOME_UF']}": row['COD_UF'] for _, row in ufs.iterrows()}
-        
-    except Exception as e:
-        st.error(f"Erro ao carregar opções de filtro: {e}")
-        return    # Filtros na sidebar - Simplificados e mais intuitivos
-    
-    st.sidebar.info(
-        "💡 **Dica:** Use estes filtros para focar suas análises em períodos, regiões ou valores específicos. "
-        "Os gráficos se atualizarão automaticamente!"
-    )
-    
-    # Filtro de período mais simples
-    periodo_opcoes = {
-        "Ano Completo (2024)": "completo",
-        "1º Semestre": "primeiro_semestre", 
-        "2º Semestre": "segundo_semestre",
-        "1º Trimestre": "primeiro_trimestre",
-        "2º Trimestre": "segundo_trimestre", 
-        "3º Trimestre": "terceiro_trimestre",
-        "4º Trimestre": "quarto_trimestre"
-    }
-    
+    # Filtro de período simples
     periodo_selecionado = st.sidebar.selectbox(
-        "📅 Período de Análise",
-        options=list(periodo_opcoes.keys()),
+        "� Período de Análise",
+        options=["Ano Completo (2024)", "1º Semestre", "2º Semestre", "1º Trimestre", "2º Trimestre", "3º Trimestre", "4º Trimestre"],
         index=0
-    )
-    
-    # Filtro de top países mais simples
-    st.sidebar.markdown("### 🌍 Foco Geográfico")
-    num_paises = st.sidebar.slider(
-        "Número de Países (Top por Valor)",
-        min_value=5,
-        max_value=25,
-        value=10,
-        step=5,
-        help="Selecione quantos países principais incluir nas análises"
-    )
-    
-    # Filtro de análise regional
-    regioes_opcoes = {
-        "Brasil Completo": "todas",
-        "Sudeste": ["SP", "RJ", "MG", "ES"],
-        "Sul": ["RS", "SC", "PR"], 
-        "Nordeste": ["BA", "PE", "CE", "MA", "PB", "RN", "AL", "SE", "PI"],
-        "Norte": ["AM", "PA", "RO", "AC", "RR", "AP", "TO"],
-        "Centro-Oeste": ["GO", "MT", "MS", "DF"]
-    }
-    
-    regiao_selecionada = st.sidebar.selectbox(
-        "🗺️ Região do Brasil",
-        options=list(regioes_opcoes.keys()),
-        index=0
-    )
-    
-    # Filtro de valor mínimo
-    st.sidebar.markdown("### 💰 Filtro de Valor")
-    valor_minimo = st.sidebar.selectbox(
-        "Valor Mínimo da Operação (US$)",
-        options=["Todos os valores", "Acima de US$ 1.000", "Acima de US$ 10.000", "Acima de US$ 100.000", "Acima de US$ 1.000.000"],
-        index=0,
-        help="Filtrar operações por valor mínimo para focar em grandes importações"
-    )
-      # Estatísticas gerais
+    )    # Estatísticas gerais
     st.markdown("## 📈 Visão Geral")
     
-    # Mostrar filtros aplicados
-    if (periodo_selecionado != "Ano Completo (2024)" or 
-        regiao_selecionada != "Brasil Completo" or 
-        valor_minimo != "Todos os valores"):
-        
-        filtros_ativos = []
-        if periodo_selecionado != "Ano Completo (2024)":
-            filtros_ativos.append(f"{periodo_selecionado}")
-        if regiao_selecionada != "🇧Brasil Completo":
-            filtros_ativos.append(f"{regiao_selecionada}")
-        if valor_minimo != "Todos os valores":
-            filtros_ativos.append(f"{valor_minimo}")
-        
-        st.info(f"🔍 **Filtros Aplicados:** {' • '.join(filtros_ativos)}")
+    # Construir filtros SQL simples
+    sql_filters = build_sql_filters(periodo_selecionado)
     
-    stats = get_basic_stats(conn)
+    # Mostrar filtros aplicados
+    if periodo_selecionado != "Ano Completo (2024)":
+        st.info(f"🔍 **Filtro Aplicado:** {periodo_selecionado}")
+    
+    stats = get_basic_stats(sql_filters)
     if stats:
         col1, col2, col3, col4 = st.columns(4)
         
@@ -337,9 +235,11 @@ def main():
     
     with tab1:
         st.markdown("### 📅 Evolução das Importações ao Longo do Ano")
+          # Construir filtros SQL simples
+        sql_filters = build_sql_filters(periodo_selecionado)
         
-        # Query para dados temporais
-        temporal_query = """
+        # Query para dados temporais com filtros
+        temporal_query = f"""
         SELECT 
             m.NOME_MES,
             m.COD_MES,
@@ -349,11 +249,17 @@ def main():
             AVG(i.VL_FOB) as valor_medio
         FROM Importacoes i
         JOIN Mes m ON i.COD_MES = m.COD_MES
+        {sql_filters}
         GROUP BY m.COD_MES, m.NOME_MES
         ORDER BY m.COD_MES
         """
         
-        df_temporal = fetch_data(temporal_query, conn)
+        df_temporal = fetch_data(temporal_query)
+        
+        # Debug
+        st.write(f"📊 **Debug Temporal:** {len(df_temporal)} registros encontrados")
+        if sql_filters:
+            st.write(f"🔍 **Filtros aplicados:** {sql_filters}")
         
         if not df_temporal.empty:
             # Gráfico de linha - Evolução temporal
@@ -476,8 +382,11 @@ def main():
     with tab2:
         st.markdown("### 🌍 Análise por Países de Origem")
         
-        # Query para dados por país
-        paises_query = """
+        # Construir filtros SQL simples
+        sql_filters = build_sql_filters(periodo_selecionado)
+        
+        # Query para dados por país com filtros
+        paises_query = f"""
         SELECT 
             p.NOME_PAIS,
             p.COD_PAIS,
@@ -489,23 +398,27 @@ def main():
             SUM(i.VL_SEGURO) as seguro_total
         FROM Importacoes i
         JOIN Pais p ON i.COD_PAIS = p.COD_PAIS
+        {sql_filters}
         GROUP BY p.COD_PAIS, p.NOME_PAIS
         ORDER BY valor_total DESC
-        LIMIT 20
+        LIMIT 15
         """
         
-        df_paises = fetch_data(paises_query, conn)
+        df_paises = fetch_data(paises_query)
+        
+        # Debug
+        st.write(f"📊 **Debug Países:** {len(df_paises)} registros encontrados")
         
         if not df_paises.empty:
-            # Top 15 países por valor
+            # Top países por valor
             col1, col2 = st.columns(2)
             
             with col1:
                 fig_paises_bar = px.bar(
-                    df_paises.head(15),
+                    df_paises.head(10),
                     x='valor_total',
                     y='NOME_PAIS',
-                    title='💰 Top 15 Países por Valor Total (US$ FOB)',
+                    title='💰 Top 10 Países por Valor Total (US$ FOB)',
                     labels={'valor_total': 'Valor Total (US$)', 'NOME_PAIS': 'País'},
                     color='valor_total',
                     color_continuous_scale='Viridis',
@@ -517,13 +430,13 @@ def main():
             with col2:
                 # Gráfico de dispersão - Valor vs Operações
                 fig_scatter = px.scatter(
-                    df_paises.head(15),
+                    df_paises.head(10),
                     x='total_operacoes',
                     y='valor_total',
                     size='peso_total',
                     color='valor_medio',
                     hover_name='NOME_PAIS',
-                    title='🔍 Valor vs Número de Operações',
+                    title='🔍 Valor vs Número de Operações (Top 10)',
                     labels={
                         'total_operacoes': 'Número de Operações',
                         'valor_total': 'Valor Total (US$)',
@@ -533,9 +446,8 @@ def main():
                 )
                 fig_scatter.update_layout(height=600)
                 st.plotly_chart(fig_scatter, use_container_width=True)
-            
-            # Mapa de calor - Top países por mês
-            paises_mes_query = """
+              # Mapa de calor - Top países por mês com filtros
+            paises_mes_query = f"""
             SELECT 
                 p.NOME_PAIS,
                 m.NOME_MES,
@@ -543,26 +455,27 @@ def main():
             FROM Importacoes i
             JOIN Pais p ON i.COD_PAIS = p.COD_PAIS
             JOIN Mes m ON i.COD_MES = m.COD_MES
-            WHERE p.NOME_PAIS IN ({})
+            LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF
+            WHERE p.NOME_PAIS IN ({','.join([f"'{pais}'" for pais in df_paises.head(min(10, num_paises))['NOME_PAIS']])})
+            {' AND ' + sql_filters.replace('WHERE ', '') if sql_filters else ''}
             GROUP BY p.NOME_PAIS, m.NOME_MES, m.COD_MES
             ORDER BY m.COD_MES
-            """.format(','.join([f"'{pais}'" for pais in df_paises.head(10)['NOME_PAIS']]))
+            """
             
-            df_heatmap = fetch_data(paises_mes_query, conn)
+            df_heatmap = fetch_data(paises_mes_query)
             
             if not df_heatmap.empty:
                 # Pivot para heatmap
                 heatmap_data = df_heatmap.pivot(
                     index='NOME_PAIS', 
                     columns='NOME_MES', 
-                    values='valor_total'
-                ).fillna(0)
+                    values='valor_total'                ).fillna(0)
                 
                 fig_heatmap = px.imshow(
                     heatmap_data.values,
                     x=heatmap_data.columns,
                     y=heatmap_data.index,
-                    title='🌡️ Heatmap: Valor das Importações por País e Mês',
+                    title=f'🌡️ Heatmap: Importações por País e Mês (Top {min(10, num_paises)} países)',
                     labels=dict(x="Mês", y="País", color="Valor (US$)"),
                     color_continuous_scale='RdYlBu_r'
                 )
@@ -572,8 +485,11 @@ def main():
     with tab3:
         st.markdown("### 🏛️ Análise por Estados Brasileiros")
         
-        # Query para dados por UF
-        uf_query = """
+        # Construir filtros SQL
+        sql_filters = build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, periodo_opcoes, regioes_opcoes)
+        
+        # Query para dados por UF com filtros
+        uf_query = f"""
         SELECT 
             uf.NOME_UF,
             uf.SIGLA_UF,
@@ -583,11 +499,12 @@ def main():
             AVG(i.VL_FOB) as valor_medio
         FROM Importacoes i
         JOIN UF uf ON i.COD_UF = uf.COD_UF
+        {sql_filters}
         GROUP BY uf.COD_UF, uf.NOME_UF, uf.SIGLA_UF
         ORDER BY valor_total DESC
         """
         
-        df_ufs = fetch_data(uf_query, conn)
+        df_ufs = fetch_data(uf_query)
         
         if not df_ufs.empty:
             col1, col2 = st.columns(2)
@@ -680,8 +597,11 @@ def main():
     with tab4:
         st.markdown("### 📦 Análise por Código NCM")
         
-        # Query para dados por NCM
-        ncm_query = """
+        # Construir filtros SQL
+        sql_filters = build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, periodo_opcoes, regioes_opcoes)
+        
+        # Query para dados por NCM com filtros
+        ncm_query = f"""
         SELECT 
             n.COD_NCM,
             n.NOME_NCM,
@@ -695,16 +615,17 @@ def main():
         FROM Importacoes i
         JOIN NCM n ON i.COD_NCM = n.COD_NCM
         JOIN Unidade u ON i.COD_UNID = u.COD_UNID
+        LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF
+        {sql_filters}
         GROUP BY n.COD_NCM, n.NOME_NCM, u.NOME_UNID, u.SIGLA_UNID
         ORDER BY valor_total DESC
-        LIMIT 20
+        LIMIT {num_paises}
         """
         
-        df_ncm = fetch_data(ncm_query, conn)
+        df_ncm = fetch_data(ncm_query)
         
-        if not df_ncm.empty:
-            # Top NCMs por valor
-            st.markdown("#### 💰 Top 20 NCMs por Valor Total")
+        if not df_ncm.empty:            # Top NCMs por valor
+            st.markdown(f"#### 💰 Top {num_paises} NCMs por Valor Total")
             
             # Truncar nomes muito longos para visualização
             df_ncm['NOME_NCM_SHORT'] = df_ncm['NOME_NCM'].apply(
@@ -712,10 +633,10 @@ def main():
             )
             
             fig_ncm = px.bar(
-                df_ncm.head(15),
+                df_ncm.head(min(15, num_paises)),
                 x='valor_total',
                 y='NOME_NCM_SHORT',
-                title='Top 15 NCMs por Valor Total (US$ FOB)',
+                title=f'Top {min(15, num_paises)} NCMs por Valor Total (US$ FOB)',
                 labels={'valor_total': 'Valor Total (US$)', 'NOME_NCM_SHORT': 'Produto NCM'},
                 color='valor_total',
                 color_continuous_scale='Greens',
@@ -724,20 +645,19 @@ def main():
             )
             fig_ncm.update_layout(height=700, yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig_ncm, use_container_width=True)
-            
-            # Análise de densidade de valor
+              # Análise de densidade de valor
             col1, col2 = st.columns(2)
             
             with col1:
                 # Scatter plot - Valor vs Quantidade
                 fig_scatter_ncm = px.scatter(
-                    df_ncm.head(15),
+                    df_ncm.head(min(15, num_paises)),
                     x='quantidade_total',
                     y='valor_total',
                     size='total_operacoes',
                     color='valor_medio',
                     hover_name='NOME_NCM_SHORT',
-                    title='🔍 Valor vs Quantidade por NCM',
+                    title=f'🔍 Valor vs Quantidade por NCM (Top {min(15, num_paises)})',
                     labels={
                         'quantidade_total': 'Quantidade Total',
                         'valor_total': 'Valor Total (US$)',
@@ -776,20 +696,38 @@ def main():
     with tab5:
         st.markdown("### 🔍 Análise Detalhada e Correlações")
         
-        # Análise de correlações entre variáveis numéricas
-        correlacao_query = """
-        SELECT 
-            VL_FOB as valor_fob,
-            KG_LIQUIDO as peso_liquido,
-            VL_FRETE as valor_frete,
-            VL_SEGURO as valor_seguro,
-            QT_ESTATISTICA as quantidade
-        FROM Importacoes
-        WHERE VL_FOB > 0 AND KG_LIQUIDO > 0
-        LIMIT 10000
-        """
+        # Construir filtros SQL
+        sql_filters = build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, periodo_opcoes, regioes_opcoes)
+          # Análise de correlações entre variáveis numéricas com filtros
+        base_where = "WHERE VL_FOB > 0 AND KG_LIQUIDO > 0"
+        if sql_filters:
+            additional_filters = sql_filters.replace('WHERE ', '')
+            correlacao_query = f"""
+            SELECT 
+                VL_FOB as valor_fob,
+                KG_LIQUIDO as peso_liquido,
+                VL_FRETE as valor_frete,
+                VL_SEGURO as valor_seguro,
+                QT_ESTATISTICA as quantidade
+            FROM Importacoes i
+            LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF
+            WHERE VL_FOB > 0 AND KG_LIQUIDO > 0 AND {additional_filters}
+            LIMIT 10000
+            """
+        else:
+            correlacao_query = """
+            SELECT 
+                VL_FOB as valor_fob,
+                KG_LIQUIDO as peso_liquido,
+                VL_FRETE as valor_frete,
+                VL_SEGURO as valor_seguro,
+                QT_ESTATISTICA as quantidade
+            FROM Importacoes
+            WHERE VL_FOB > 0 AND KG_LIQUIDO > 0
+            LIMIT 10000
+            """
         
-        df_corr = fetch_data(correlacao_query, conn)
+        df_corr = fetch_data(correlacao_query)
         
         if not df_corr.empty:
             st.markdown("#### 📊 Matriz de Correlação")
@@ -1046,27 +984,45 @@ def main():
             
             styled_df = correlacoes_resumo.style.applymap(color_correlation, subset=['Correlação'])
             st.dataframe(styled_df, use_container_width=True)
-        
-        # Análise de outliers
+          # Análise de outliers com filtros
         st.markdown("#### 🎯 Análise de Outliers")
         
-        outliers_query = """
-        SELECT 
-            i.VL_FOB,
-            i.KG_LIQUIDO,
-            i.QT_ESTATISTICA,
-            p.NOME_PAIS,
-            n.NOME_NCM,
-            uf.NOME_UF
-        FROM Importacoes i
-        JOIN Pais p ON i.COD_PAIS = p.COD_PAIS
-        JOIN NCM n ON i.COD_NCM = n.COD_NCM
-        JOIN UF uf ON i.COD_UF = uf.COD_UF
-        ORDER BY i.VL_FOB DESC
-        LIMIT 100
-        """
+        if sql_filters:
+            additional_filters = sql_filters.replace('WHERE ', '')
+            outliers_query = f"""
+            SELECT 
+                i.VL_FOB,
+                i.KG_LIQUIDO,
+                i.QT_ESTATISTICA,
+                p.NOME_PAIS,
+                n.NOME_NCM,
+                uf.NOME_UF
+            FROM Importacoes i
+            JOIN Pais p ON i.COD_PAIS = p.COD_PAIS
+            JOIN NCM n ON i.COD_NCM = n.COD_NCM
+            JOIN UF uf ON i.COD_UF = uf.COD_UF
+            WHERE {additional_filters}
+            ORDER BY i.VL_FOB DESC
+            LIMIT 100
+            """
+        else:
+            outliers_query = """
+            SELECT 
+                i.VL_FOB,
+                i.KG_LIQUIDO,
+                i.QT_ESTATISTICA,
+                p.NOME_PAIS,
+                n.NOME_NCM,
+                uf.NOME_UF
+            FROM Importacoes i
+            JOIN Pais p ON i.COD_PAIS = p.COD_PAIS
+            JOIN NCM n ON i.COD_NCM = n.COD_NCM
+            JOIN UF uf ON i.COD_UF = uf.COD_UF
+            ORDER BY i.VL_FOB DESC
+            LIMIT 100
+            """
         
-        df_outliers = fetch_data(outliers_query, conn)
+        df_outliers = fetch_data(outliers_query)
         
         if not df_outliers.empty:
             col1, col2 = st.columns(2)
@@ -1103,8 +1059,7 @@ def main():
             df_top_imports.columns = ['Valor FOB', 'Peso Líquido', 'País', 'Produto NCM', 'Estado']
             
             st.dataframe(df_top_imports, use_container_width=True)
-    
-    # Footer
+      # Footer
     st.markdown("---")
     st.markdown("""
     <div style="text-align: center; padding: 1rem; background-color: #f0f2f6; border-radius: 10px;">
@@ -1115,9 +1070,6 @@ def main():
         </p>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Fechar conexão
-    conn.close()
 
 if __name__ == "__main__":
     main()
