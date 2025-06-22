@@ -809,39 +809,243 @@ def main():
             )
             fig_corr.update_layout(height=500)
             st.plotly_chart(fig_corr, use_container_width=True)
+              # Análises específicas de correlação
+            st.markdown("#### 💎 Análises de Correlação Detalhadas")
             
-            # Análises específicas
-            col1, col2 = st.columns(2)
+            # Preparar dados para análises
+            df_analysis = df_corr.copy()
+            
+            # Calcular preço por kg e percentual de frete
+            df_analysis['preco_por_kg'] = df_analysis['valor_fob'] / df_analysis['peso_liquido']
+            df_analysis['percentual_frete'] = (df_analysis['valor_frete'] / df_analysis['valor_fob']) * 100
+            
+            # Filtrar outliers extremos para melhor visualização
+            q99_valor = df_analysis['valor_fob'].quantile(0.99)
+            q99_peso = df_analysis['peso_liquido'].quantile(0.99)
+            q99_frete = df_analysis['valor_frete'].quantile(0.99)
+            
+            df_filtered = df_analysis[
+                (df_analysis['valor_fob'] <= q99_valor) & 
+                (df_analysis['peso_liquido'] <= q99_peso) &
+                (df_analysis['valor_frete'] <= q99_frete) &
+                (df_analysis['valor_frete'] > 0) &
+                (df_analysis['percentual_frete'] <= 50)  # Filtrar fretes muito altos
+            ].sample(n=min(2000, len(df_analysis)))
+            
+            # Análise 1: Valor FOB vs Peso Líquido
+            st.markdown("##### 💰 Análise: Valor FOB vs Peso Líquido")
+            
+            col1, col2 = st.columns([3, 1])
             
             with col1:
-                # Relação Valor x Peso
-                df_sample = df_corr.sample(n=min(1000, len(df_corr)))
-                
                 fig_valor_peso = px.scatter(
-                    df_sample,
+                    df_filtered,
                     x='peso_liquido',
                     y='valor_fob',
-                    title='💰 Valor FOB vs Peso Líquido',
-                    labels={'peso_liquido': 'Peso Líquido (kg)', 'valor_fob': 'Valor FOB (US$)'},
-                    opacity=0.6,
-                    trendline="ols"
+                    color='preco_por_kg',
+                    title='Valor FOB vs Peso Líquido (Escala Logarítmica)',
+                    labels={
+                        'peso_liquido': 'Peso Líquido (kg)', 
+                        'valor_fob': 'Valor FOB (US$)',
+                        'preco_por_kg': 'Preço/kg (US$)'
+                    },
+                    opacity=0.7,
+                    color_continuous_scale='Viridis',
+                    log_x=True,
+                    log_y=True,
+                    hover_data={'preco_por_kg': ':.2f'}
                 )
-                fig_valor_peso.update_layout(height=400)
+                
+                fig_valor_peso.update_layout(
+                    height=500,
+                    annotations=[
+                        dict(
+                            x=0.02, y=0.98,
+                            xref="paper", yref="paper",
+                            text="🔍 Cores mais escuras = maior valor por kg",
+                            showarrow=False,
+                            bgcolor="rgba(255,255,255,0.8)",
+                            font=dict(size=11)
+                        )
+                    ]
+                )
                 st.plotly_chart(fig_valor_peso, use_container_width=True)
             
             with col2:
-                # Relação Frete x Valor
+                # Insights automáticos
+                correlacao_valor_peso = df_filtered['valor_fob'].corr(df_filtered['peso_liquido'])
+                mediana_preco_kg = df_filtered['preco_por_kg'].median()
+                
+                st.markdown("**📊 Insights:**")
+                st.info(f"""
+                • **Correlação:** {correlacao_valor_peso:.3f}
+                • **Preço mediano:** US$ {mediana_preco_kg:.2f}/kg
+                • **Padrão:** {'Correlação positiva moderada' if correlacao_valor_peso > 0.3 else 'Correlação fraca'}
+                """)
+                
+                if correlacao_valor_peso > 0.5:
+                    st.success("✅ Produtos mais pesados tendem a ter maior valor")
+                elif correlacao_valor_peso < 0.3:
+                    st.warning("⚠️ Relação fraca - produtos de alto valor agregado")
+            
+            # Análise 2: Frete vs Valor FOB
+            st.markdown("##### 🚢 Análise: Custo de Frete vs Valor FOB")
+            
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
                 fig_frete_valor = px.scatter(
-                    df_sample,
+                    df_filtered,
                     x='valor_fob',
                     y='valor_frete',
-                    title='🚢 Valor do Frete vs Valor FOB',
-                    labels={'valor_fob': 'Valor FOB (US$)', 'valor_frete': 'Valor do Frete (US$)'},
-                    opacity=0.6,
-                    trendline="ols"
+                    color='percentual_frete',
+                    title='Valor do Frete vs Valor FOB (Escala Logarítmica)',
+                    labels={
+                        'valor_fob': 'Valor FOB (US$)', 
+                        'valor_frete': 'Valor do Frete (US$)',
+                        'percentual_frete': '% Frete'
+                    },
+                    opacity=0.7,
+                    color_continuous_scale='Plasma',
+                    log_x=True,
+                    log_y=True,
+                    hover_data={'percentual_frete': ':.1f'}
                 )
-                fig_frete_valor.update_layout(height=400)
+                
+                # Adicionar linha de referência (5% do valor FOB)
+                x_range = [df_filtered['valor_fob'].min(), df_filtered['valor_fob'].max()]
+                y_ref = [x * 0.05 for x in x_range]
+                
+                fig_frete_valor.add_trace(
+                    go.Scatter(
+                        x=x_range, y=y_ref,
+                        mode='lines',
+                        name='Referência 5%',
+                        line=dict(color='red', dash='dash', width=2),
+                        hovertemplate='Referência: 5% do valor FOB'
+                    )
+                )
+                
+                fig_frete_valor.update_layout(
+                    height=500,
+                    annotations=[
+                        dict(
+                            x=0.02, y=0.98,
+                            xref="paper", yref="paper",
+                            text="🔍 Cores mais claras = maior % de frete",
+                            showarrow=False,
+                            bgcolor="rgba(255,255,255,0.8)",
+                            font=dict(size=11)
+                        ),
+                        dict(
+                            x=0.02, y=0.90,
+                            xref="paper", yref="paper",
+                            text="📏 Linha vermelha = 5% de referência",
+                            showarrow=False,
+                            bgcolor="rgba(255,255,255,0.8)",
+                            font=dict(size=11)
+                        )
+                    ]
+                )
                 st.plotly_chart(fig_frete_valor, use_container_width=True)
+            
+            with col2:
+                # Insights automáticos para frete
+                correlacao_frete_valor = df_filtered['valor_fob'].corr(df_filtered['valor_frete'])
+                mediana_percentual_frete = df_filtered['percentual_frete'].median()
+                frete_alto = (df_filtered['percentual_frete'] > 10).mean() * 100
+                
+                st.markdown("**📊 Insights:**")
+                st.info(f"""
+                • **Correlação:** {correlacao_frete_valor:.3f}
+                • **% Frete mediano:** {mediana_percentual_frete:.1f}%
+                • **Frete alto (>10%):** {frete_alto:.1f}% dos casos
+                """)
+                
+                if mediana_percentual_frete > 8:
+                    st.warning("⚠️ Frete relativamente alto")
+                else:
+                    st.success("✅ Frete dentro da média esperada")
+            
+            # Análise 3: Distribuição do Percentual de Frete
+            st.markdown("##### 📊 Distribuição dos Custos de Frete")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Histograma do percentual de frete
+                fig_hist_frete = px.histogram(
+                    df_filtered,
+                    x='percentual_frete',
+                    nbins=30,
+                    title='Distribuição do Percentual de Frete',
+                    labels={'percentual_frete': 'Percentual do Frete (%)', 'count': 'Frequência'},
+                    color_discrete_sequence=['#2E8B57']
+                )
+                
+                # Adicionar linha da mediana
+                fig_hist_frete.add_vline(
+                    x=mediana_percentual_frete, 
+                    line_dash="dash", 
+                    line_color="red",
+                    annotation_text=f"Mediana: {mediana_percentual_frete:.1f}%"
+                )
+                
+                fig_hist_frete.update_layout(height=400)
+                st.plotly_chart(fig_hist_frete, use_container_width=True)
+            
+            with col2:
+                # Box plot do percentual de frete
+                fig_box_frete = px.box(
+                    df_filtered,
+                    y='percentual_frete',
+                    title='Box Plot: Percentual de Frete',
+                    labels={'percentual_frete': 'Percentual do Frete (%)'}
+                )
+                
+                fig_box_frete.update_layout(height=400)
+                st.plotly_chart(fig_box_frete, use_container_width=True)
+            
+            # Resumo das correlações
+            st.markdown("##### 📈 Resumo das Correlações")
+            
+            correlacoes_resumo = pd.DataFrame({
+                'Variáveis': [
+                    'Valor FOB ↔ Peso Líquido',
+                    'Valor FOB ↔ Valor Frete', 
+                    'Peso Líquido ↔ Valor Frete',
+                    'Valor FOB ↔ Quantidade',
+                    'Peso Líquido ↔ Quantidade'
+                ],
+                'Correlação': [
+                    df_filtered['valor_fob'].corr(df_filtered['peso_liquido']),
+                    df_filtered['valor_fob'].corr(df_filtered['valor_frete']),
+                    df_filtered['peso_liquido'].corr(df_filtered['valor_frete']),
+                    df_filtered['valor_fob'].corr(df_filtered['quantidade']),
+                    df_filtered['peso_liquido'].corr(df_filtered['quantidade'])
+                ],
+                'Interpretação': [
+                    'Produtos pesados = maior valor' if df_filtered['valor_fob'].corr(df_filtered['peso_liquido']) > 0.3 else 'Relação fraca',
+                    'Frete proporcional ao valor' if df_filtered['valor_fob'].corr(df_filtered['valor_frete']) > 0.5 else 'Frete independente do valor',
+                    'Frete baseado no peso' if df_filtered['peso_liquido'].corr(df_filtered['valor_frete']) > 0.3 else 'Frete não baseado no peso',
+                    'Volume impacta valor' if df_filtered['valor_fob'].corr(df_filtered['quantidade']) > 0.3 else 'Volume não determina valor',
+                    'Peso relacionado à quantidade' if df_filtered['peso_liquido'].corr(df_filtered['quantidade']) > 0.3 else 'Peso independente da quantidade'
+                ]
+            })
+            
+            # Colorir correlações por intensidade
+            def color_correlation(val):
+                if abs(val) > 0.7:
+                    return 'background-color: #2E8B57; color: white'  # Verde forte
+                elif abs(val) > 0.5:
+                    return 'background-color: #90EE90; color: black'  # Verde claro
+                elif abs(val) > 0.3:
+                    return 'background-color: #FFFF99; color: black'  # Amarelo
+                else:
+                    return 'background-color: #FFB6C1; color: black'  # Rosa claro
+            
+            styled_df = correlacoes_resumo.style.applymap(color_correlation, subset=['Correlação'])
+            st.dataframe(styled_df, use_container_width=True)
         
         # Análise de outliers
         st.markdown("#### 🎯 Análise de Outliers")
