@@ -67,7 +67,7 @@ def fetch_data(query):
         st.error(f"Erro ao executar query: {e}")
         return pd.DataFrame()
 
-def build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo):
+def build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, pais_selecionado):
     """Constrói filtros SQL baseados nas seleções do usuário"""
     filters = []
     
@@ -109,6 +109,12 @@ def build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo):
     elif valor_minimo == "Acima de US$ 1.000.000":
         filters.append("i.VL_FOB >= 1000000")
     
+    # Filtro de país
+    if pais_selecionado != "Todos os países":
+        # Escapar aspas simples no nome do país
+        pais_escaped = pais_selecionado.replace("'", "''")
+        filters.append(f"p.NOME_PAIS = '{pais_escaped}'")
+    
     # Retornar filtros
     if filters:
         return "WHERE " + " AND ".join(filters)
@@ -119,9 +125,8 @@ def get_basic_stats(sql_filters=""):
     try:
         conn = sqlite3.connect('importacoes_brasil_2024.db', check_same_thread=False)
         stats = {}
-        
-        # Base das queries (precisa do LEFT JOIN para região)
-        base_from = "FROM Importacoes i LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF"
+          # Base das queries (precisa do LEFT JOIN para região e país)
+        base_from = "FROM Importacoes i LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF LEFT JOIN Pais p ON i.COD_PAIS = p.COD_PAIS"
         
         # Total de importações
         total_query = f"SELECT COUNT(*) as total {base_from} {sql_filters}"
@@ -195,19 +200,33 @@ def main():
         options=["Brasil Completo", "Sudeste", "Sul", "Nordeste", "Norte", "Centro-Oeste"],
         index=0
     )
-    
-    # Filtro de valor mínimo
+      # Filtro de valor mínimo
     valor_minimo = st.sidebar.selectbox(
         "💰 Valor Mínimo da Operação",
         options=["Todos os valores", "Acima de US$ 1.000", "Acima de US$ 10.000", "Acima de US$ 100.000", "Acima de US$ 1.000.000"],
         index=0,
         help="Filtrar operações por valor mínimo para focar em grandes importações"
     )
+    
+    # Filtro de países (carregar dinamicamente)
+    @st.cache_data
+    def get_countries():
+        query = "SELECT DISTINCT p.NOME_PAIS FROM Pais p JOIN Importacoes i ON p.COD_PAIS = i.COD_PAIS ORDER BY p.NOME_PAIS"
+        return fetch_data(query)
+    
+    df_countries = get_countries()
+    countries_list = ["Todos os países"] + df_countries['NOME_PAIS'].tolist() if not df_countries.empty else ["Todos os países"]
+    
+    pais_selecionado = st.sidebar.selectbox(
+        "🌍 País de Origem",
+        options=countries_list,
+        index=0,
+        help="Filtrar importações por país de origem específico"
+    )
       # Estatísticas gerais
     st.markdown("## 📈 Visão Geral")
-    
-    # Construir filtros SQL simples
-    sql_filters = build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo)
+      # Construir filtros SQL simples
+    sql_filters = build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, pais_selecionado)
     
     # Mostrar filtros aplicados
     filtros_ativos = []
@@ -217,6 +236,8 @@ def main():
         filtros_ativos.append(regiao_selecionada)
     if valor_minimo != "Todos os valores":
         filtros_ativos.append(valor_minimo)
+    if pais_selecionado != "Todos os países":
+        filtros_ativos.append(f"País: {pais_selecionado}")
     
     if filtros_ativos:
         st.info(f"🔍 **Filtros Aplicados:** {' • '.join(filtros_ativos)}")
@@ -275,8 +296,7 @@ def main():
     ])
     
     with tab1:
-        st.markdown("### 📅 Evolução das Importações ao Longo do Ano")
-          # Query para dados temporais com filtros
+        st.markdown("### 📅 Evolução das Importações ao Longo do Ano")        # Query para dados temporais com filtros
         temporal_query = f"""
         SELECT 
             m.NOME_MES,
@@ -288,9 +308,11 @@ def main():
         FROM Importacoes i
         JOIN Mes m ON i.COD_MES = m.COD_MES
         LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF
+        LEFT JOIN Pais p ON i.COD_PAIS = p.COD_PAIS
         {sql_filters}
         GROUP BY m.COD_MES, m.NOME_MES
-        ORDER BY m.COD_MES        """
+        ORDER BY m.COD_MES
+        """
         
         df_temporal = fetch_data(temporal_query)
         
@@ -425,7 +447,7 @@ def main():
             st.warning("⚠️ Nenhum dado encontrado para o período selecionado")
     
     with tab2:
-        st.markdown("### 🌍 Principais Países de Origem")          # Query para países com filtros (expandida)
+        st.markdown("### 🌍 Principais Países de Origem")        # Query para países com filtros (expandida)
         paises_query = f"""
         SELECT 
             p.NOME_PAIS,
@@ -441,7 +463,8 @@ def main():
         LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF
         {sql_filters}
         GROUP BY p.COD_PAIS, p.NOME_PAIS
-        ORDER BY valor_total DESC        LIMIT 15
+        ORDER BY valor_total DESC
+        LIMIT 15
         """
         
         df_paises = fetch_data(paises_query)
@@ -531,8 +554,7 @@ def main():
     
     with tab3:
         st.markdown("### 🏛️ Análise por Estados Brasileiros")
-        
-        # Query para estados com filtros (limitando a top 15)
+          # Query para estados com filtros (limitando a top 15)
         estados_query = f"""
         SELECT 
             uf.NOME_UF,
@@ -543,10 +565,12 @@ def main():
             AVG(i.VL_FOB) as valor_medio
         FROM Importacoes i
         JOIN UF uf ON i.COD_UF = uf.COD_UF
+        LEFT JOIN Pais p ON i.COD_PAIS = p.COD_PAIS
         {sql_filters}
         GROUP BY uf.COD_UF, uf.NOME_UF, uf.SIGLA_UF
         ORDER BY valor_total DESC
-        LIMIT 15        """
+        LIMIT 15
+        """
         
         df_estados = fetch_data(estados_query)
         
@@ -613,8 +637,7 @@ def main():
     
     with tab4:
         st.markdown("### 📦 Análise por Código NCM")
-        
-        # Query para NCMs com filtros (limitando a top 15)
+          # Query para NCMs com filtros (limitando a top 15)
         ncm_query = f"""
         SELECT 
             n.COD_NCM,
@@ -630,10 +653,12 @@ def main():
         JOIN NCM n ON i.COD_NCM = n.COD_NCM
         JOIN Unidade u ON i.COD_UNID = u.COD_UNID
         LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF
+        LEFT JOIN Pais p ON i.COD_PAIS = p.COD_PAIS
         {sql_filters}
         GROUP BY n.COD_NCM, n.NOME_NCM, u.NOME_UNID, u.SIGLA_UNID
         ORDER BY valor_total DESC
-        LIMIT 15        """
+        LIMIT 15
+        """
         
         df_ncm = fetch_data(ncm_query)
         
@@ -691,225 +716,270 @@ def main():
                 fig_hist = px.histogram(df_ncm, x='valor_medio', nbins=10,
                                        title='Distribuição do Valor Médio por Operação',
                                        labels={'valor_medio': 'Valor Médio (US$)', 'count': 'Frequência'})
-                st.plotly_chart(fig_hist, use_container_width=True)
+                st.plotly_chart(fig_hist, use_container_width=True)        
         else:
             st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados")
 
     with tab5:
-        st.markdown("### 🔍 Análise Detalhada e Correlações")
+        st.markdown("### 🔍 Análise Detalhada e Insights")
         
-        # Análise de correlações entre variáveis numéricas com filtros
-        correlacao_query = f"""
+        # Análise 1: Eficiência Comercial
+        st.markdown("#### 💡 Análise de Eficiência Comercial")
+        
+        eficiencia_query = f"""
         SELECT 
-            VL_FOB as valor_fob,
-            KG_LIQUIDO as peso_liquido,
-            VL_FRETE as valor_frete,
-            VL_SEGURO as valor_seguro,
-            QT_ESTATISTICA as quantidade
-        FROM Importacoes i
-        LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF
-        {sql_filters if sql_filters else ''}
-        {' AND ' if sql_filters else 'WHERE '} VL_FOB > 0 AND KG_LIQUIDO > 0
-        LIMIT 10000
-        """
-        
-        df_corr = fetch_data(correlacao_query)
-        
-        if not df_corr.empty:
-            st.markdown("#### 📊 Matriz de Correlação")
-            
-            # Calcular correlações
-            corr_matrix = df_corr.corr()
-            
-            # Heatmap de correlação
-            fig_corr = px.imshow(
-                corr_matrix.values,
-                x=corr_matrix.columns,
-                y=corr_matrix.index,
-                title='Matriz de Correlação entre Variáveis',
-                color_continuous_scale='RdBu',
-                zmin=-1, zmax=1,
-                text_auto=True
-            )
-            fig_corr.update_layout(height=500)
-            st.plotly_chart(fig_corr, use_container_width=True)
-            
-            # Análises específicas de correlação
-            st.markdown("#### 💎 Análises de Correlação Detalhadas")
-            
-            # Preparar dados para análises
-            df_analysis = df_corr.copy()
-            
-            # Calcular preço por kg e percentual de frete
-            df_analysis['preco_por_kg'] = df_analysis['valor_fob'] / df_analysis['peso_liquido']
-            df_analysis['percentual_frete'] = (df_analysis['valor_frete'] / df_analysis['valor_fob']) * 100
-            
-            # Filtrar outliers extremos para melhor visualização
-            q99_valor = df_analysis['valor_fob'].quantile(0.99)
-            q99_peso = df_analysis['peso_liquido'].quantile(0.99)
-            q99_frete = df_analysis['valor_frete'].quantile(0.99)
-            
-            df_filtered = df_analysis[
-                (df_analysis['valor_fob'] <= q99_valor) & 
-                (df_analysis['peso_liquido'] <= q99_peso) &
-                (df_analysis['valor_frete'] <= q99_frete) &
-                (df_analysis['valor_frete'] > 0) &
-                (df_analysis['percentual_frete'] <= 50)
-            ].sample(n=min(2000, len(df_analysis)))
-            
-            # Análise 1: Valor FOB vs Peso Líquido
-            st.markdown("##### 💰 Análise: Valor FOB vs Peso Líquido")
-            
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
-                fig_valor_peso = px.scatter(
-                    df_filtered.sample(n=min(1000, len(df_filtered))),
-                    x='peso_liquido',
-                    y='valor_fob',
-                    title='Relação entre Valor FOB e Peso Líquido',
-                    labels={'peso_liquido': 'Peso Líquido (kg)', 'valor_fob': 'Valor FOB (US$)'},
-                    opacity=0.6
-                )
-                st.plotly_chart(fig_valor_peso, use_container_width=True)
-            
-            with col2:
-                correlacao_valor_peso = df_filtered['valor_fob'].corr(df_filtered['peso_liquido'])
-                st.metric("Correlação", f"{correlacao_valor_peso:.3f}")
-                if correlacao_valor_peso > 0.3:
-                    st.success("✅ Correlação positiva moderada")
-                elif correlacao_valor_peso < -0.3:
-                    st.error("❌ Correlação negativa moderada")
-                else:
-                    st.warning("⚠️ Correlação fraca")
-            
-            # Análise 2: Frete vs Valor FOB
-            st.markdown("##### 🚢 Análise: Custo de Frete vs Valor FOB")
-            
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
-                fig_frete_valor = px.scatter(
-                    df_filtered.sample(n=min(1000, len(df_filtered))),
-                    x='valor_fob',
-                    y='valor_frete',
-                    title='Relação entre Valor FOB e Custo de Frete',
-                    labels={'valor_fob': 'Valor FOB (US$)', 'valor_frete': 'Valor Frete (US$)'},
-                    opacity=0.6
-                )
-                st.plotly_chart(fig_frete_valor, use_container_width=True)
-            
-            with col2:
-                correlacao_frete = df_filtered['valor_fob'].corr(df_filtered['valor_frete'])
-                st.metric("Correlação", f"{correlacao_frete:.3f}")
-                if correlacao_frete > 0.5:
-                    st.success("✅ Frete proporcional ao valor")
-                else:
-                    st.warning("⚠️ Frete independente do valor")
-            
-            # Análise 3: Distribuição do Percentual de Frete
-            st.markdown("##### 📊 Distribuição dos Custos de Frete")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig_hist_frete = px.histogram(
-                    df_filtered,
-                    x='percentual_frete',
-                    nbins=30,
-                    title='Distribuição do Percentual de Frete',
-                    labels={'percentual_frete': 'Percentual do Frete (%)', 'count': 'Frequência'}
-                )
-                st.plotly_chart(fig_hist_frete, use_container_width=True)
-            
-            with col2:
-                # Estatísticas do frete
-                st.markdown("**Estatísticas do Frete:**")
-                st.write(f"- Média: {df_filtered['percentual_frete'].mean():.1f}%")
-                st.write(f"- Mediana: {df_filtered['percentual_frete'].median():.1f}%")
-                st.write(f"- Desvio Padrão: {df_filtered['percentual_frete'].std():.1f}%")
-                st.write(f"- Máximo: {df_filtered['percentual_frete'].max():.1f}%")
-            
-            # Resumo das correlações
-            st.markdown("##### 📈 Resumo das Correlações")
-            
-            correlacoes_resumo = pd.DataFrame({
-                'Variáveis': [
-                    'Valor FOB ↔ Peso Líquido',
-                    'Valor FOB ↔ Valor Frete', 
-                    'Peso Líquido ↔ Valor Frete',
-                    'Valor FOB ↔ Quantidade',
-                    'Peso Líquido ↔ Quantidade'
-                ],
-                'Correlação': [
-                    df_filtered['valor_fob'].corr(df_filtered['peso_liquido']),
-                    df_filtered['valor_fob'].corr(df_filtered['valor_frete']),
-                    df_filtered['peso_liquido'].corr(df_filtered['valor_frete']),
-                    df_filtered['valor_fob'].corr(df_filtered['quantidade']),
-                    df_filtered['peso_liquido'].corr(df_filtered['quantidade'])
-                ],
-                'Interpretação': [
-                    'Produtos pesados = maior valor' if df_filtered['valor_fob'].corr(df_filtered['peso_liquido']) > 0.3 else 'Relação fraca',
-                    'Frete proporcional ao valor' if df_filtered['valor_fob'].corr(df_filtered['valor_frete']) > 0.5 else 'Frete independente do valor',
-                    'Frete baseado no peso' if df_filtered['peso_liquido'].corr(df_filtered['valor_frete']) > 0.3 else 'Frete não baseado no peso',
-                    'Volume impacta valor' if df_filtered['valor_fob'].corr(df_filtered['quantidade']) > 0.3 else 'Volume não determina valor',
-                    'Peso relacionado à quantidade' if df_filtered['peso_liquido'].corr(df_filtered['quantidade']) > 0.3 else 'Peso independente da quantidade'
-                ]
-            })
-            
-            # Colorir correlações por intensidade
-            st.dataframe(correlacoes_resumo, use_container_width=True)
-        
-        # Análise de outliers
-        st.markdown("#### 🎯 Análise de Outliers")
-        
-        outliers_query = f"""
-        SELECT 
-            i.VL_FOB,
-            i.KG_LIQUIDO,
-            i.QT_ESTATISTICA,
             p.NOME_PAIS,
-            n.NOME_NCM,
-            uf.NOME_UF
+            COUNT(*) as num_operacoes,
+            SUM(i.VL_FOB) as valor_total,
+            AVG(i.VL_FOB) as valor_medio_operacao,
+            SUM(i.KG_LIQUIDO) as peso_total,
+            AVG(i.VL_FOB / NULLIF(i.KG_LIQUIDO, 0)) as valor_por_kg
         FROM Importacoes i
         JOIN Pais p ON i.COD_PAIS = p.COD_PAIS
-        JOIN NCM n ON i.COD_NCM = n.COD_NCM
-        JOIN UF uf ON i.COD_UF = uf.COD_UF
-        {sql_filters}
-        ORDER BY i.VL_FOB DESC
-        LIMIT 100
+        LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF
+        {sql_filters if sql_filters else ''}
+        {' AND ' if sql_filters else 'WHERE '} i.KG_LIQUIDO > 0 AND i.VL_FOB > 0
+        GROUP BY p.COD_PAIS, p.NOME_PAIS
+        HAVING COUNT(*) >= 10
+        ORDER BY valor_total DESC
+        LIMIT 15
         """
         
-        df_outliers = fetch_data(outliers_query)
+        df_eficiencia = fetch_data(eficiencia_query)
         
-        if not df_outliers.empty:
+        if not df_eficiencia.empty:
             col1, col2 = st.columns(2)
             
             with col1:
-                # Box plot dos valores
-                fig_box = px.box(df_outliers.head(50), y='VL_FOB',
-                               title='📦 Distribuição dos Maiores Valores FOB')
-                st.plotly_chart(fig_box, use_container_width=True)
+                # Gráfico de bolhas: Valor médio vs Valor por kg
+                fig_eficiencia = px.scatter(
+                    df_eficiencia, 
+                    x='valor_medio_operacao', 
+                    y='valor_por_kg',
+                    size='num_operacoes',
+                    color='valor_total',
+                    hover_name='NOME_PAIS',
+                    title='💰 Eficiência: Valor Médio vs Valor por Kg',
+                    labels={
+                        'valor_medio_operacao': 'Valor Médio por Operação (US$)',
+                        'valor_por_kg': 'Valor por Kg (US$/kg)',
+                        'num_operacoes': 'Número de Operações'
+                    },
+                    color_continuous_scale='Viridis'
+                )
+                fig_eficiencia.update_layout(height=500)
+                st.plotly_chart(fig_eficiencia, use_container_width=True)
             
             with col2:
-                # Scatter plot: Valor vs Peso dos outliers
-                fig_outlier_scatter = px.scatter(df_outliers.head(30), 
-                                               x='KG_LIQUIDO', y='VL_FOB',
-                                               hover_name='NOME_PAIS',
-                                               title='💎 Outliers: Valor vs Peso')
-                st.plotly_chart(fig_outlier_scatter, use_container_width=True)
+                # Ranking de eficiência (valor por kg)
+                df_top_efficiency = df_eficiencia.nlargest(10, 'valor_por_kg')
+                
+                fig_ranking = px.bar(
+                    df_top_efficiency,
+                    x='valor_por_kg',
+                    y='NOME_PAIS',
+                    orientation='h',
+                    title='🏆 Top 10 Países - Maior Valor por Kg',
+                    labels={'valor_por_kg': 'Valor por Kg (US$/kg)', 'NOME_PAIS': 'País'},
+                    color='valor_por_kg',
+                    color_continuous_scale='Blues'
+                )
+                fig_ranking.update_layout(yaxis={'categoryorder': 'total ascending'}, height=500)
+                st.plotly_chart(fig_ranking, use_container_width=True)
+        
+        # Análise 2: Padrões Sazonais por Categoria
+        st.markdown("#### 📅 Análise de Padrões Sazonais")
+        
+        if periodo_selecionado == "Ano Completo (2024)":
+            sazonalidade_query = f"""
+            SELECT 
+                m.NOME_MES,
+                m.COD_MES,
+                CASE 
+                    WHEN n.COD_NCM LIKE '01%' OR n.COD_NCM LIKE '02%' OR n.COD_NCM LIKE '03%' OR n.COD_NCM LIKE '04%' OR n.COD_NCM LIKE '05%' THEN 'Alimentos e Animais'
+                    WHEN n.COD_NCM LIKE '84%' OR n.COD_NCM LIKE '85%' THEN 'Máquinas e Equipamentos'
+                    WHEN n.COD_NCM LIKE '87%' THEN 'Veículos'
+                    WHEN n.COD_NCM LIKE '27%' THEN 'Combustíveis'
+                    WHEN n.COD_NCM LIKE '72%' OR n.COD_NCM LIKE '73%' THEN 'Metais'
+                    ELSE 'Outros'
+                END as categoria,
+                SUM(i.VL_FOB) as valor_total
+            FROM Importacoes i
+            JOIN Mes m ON i.COD_MES = m.COD_MES
+            JOIN NCM n ON i.COD_NCM = n.COD_NCM
+            LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF
+            LEFT JOIN Pais p ON i.COD_PAIS = p.COD_PAIS
+            {sql_filters if sql_filters else ''}
+            GROUP BY m.COD_MES, m.NOME_MES, categoria
+            ORDER BY m.COD_MES, valor_total DESC
+            """
             
-            # Top 10 maiores importações
-            st.markdown("#### 🏆 Top 10 Maiores Importações por Valor")
+            df_sazonalidade = fetch_data(sazonalidade_query)
             
-            df_top_imports = df_outliers.head(10)[['VL_FOB', 'KG_LIQUIDO', 'NOME_PAIS', 
-                                                  'NOME_NCM', 'NOME_UF']].copy()
-            df_top_imports['VL_FOB'] = df_top_imports['VL_FOB'].apply(lambda x: f"US$ {x:,.2f}")
-            df_top_imports['KG_LIQUIDO'] = df_top_imports['KG_LIQUIDO'].apply(lambda x: f"{x:,.2f} kg")
-            df_top_imports['NOME_NCM'] = df_top_imports['NOME_NCM'].apply(lambda x: x[:60] + '...' if len(x) > 60 else x)
-            df_top_imports.columns = ['Valor FOB', 'Peso Líquido', 'País', 'Produto NCM', 'Estado']
+            if not df_sazonalidade.empty:
+                # Gráfico de linha por categoria
+                fig_sazon = px.line(
+                    df_sazonalidade,
+                    x='NOME_MES',
+                    y='valor_total',
+                    color='categoria',
+                    title='📈 Sazonalidade por Categoria de Produtos',
+                    labels={'valor_total': 'Valor Total (US$)', 'NOME_MES': 'Mês'},
+                    markers=True
+                )
+                fig_sazon.update_layout(height=500)
+                st.plotly_chart(fig_sazon, use_container_width=True)
+        else:
+            st.info("📌 A análise de sazonalidade está disponível apenas para 'Ano Completo (2024)'")
+        
+        # Análise 3: Distribuição de Valores
+        st.markdown("#### 📊 Análise de Distribuição de Valores")
+        
+        distribuicao_query = f"""
+        SELECT 
+            i.VL_FOB,
+            CASE 
+                WHEN i.VL_FOB <= 1000 THEN 'Até US$ 1K'
+                WHEN i.VL_FOB <= 10000 THEN 'US$ 1K - 10K'
+                WHEN i.VL_FOB <= 100000 THEN 'US$ 10K - 100K'
+                WHEN i.VL_FOB <= 1000000 THEN 'US$ 100K - 1M'
+                ELSE 'Acima de US$ 1M'
+            END as faixa_valor
+        FROM Importacoes i
+        LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF
+        LEFT JOIN Pais p ON i.COD_PAIS = p.COD_PAIS
+        {sql_filters if sql_filters else ''}
+        {' AND ' if sql_filters else 'WHERE '} i.VL_FOB > 0
+        """
+        
+        df_distribuicao = fetch_data(distribuicao_query)
+        
+        if not df_distribuicao.empty:
+            col1, col2 = st.columns(2)
             
-            st.dataframe(df_top_imports, use_container_width=True)
+            with col1:
+                # Contagem por faixa de valor
+                faixa_counts = df_distribuicao['faixa_valor'].value_counts()
+                
+                fig_counts = px.pie(
+                    values=faixa_counts.values,
+                    names=faixa_counts.index,
+                    title='📋 Distribuição por Faixa de Valor (Quantidade)',
+                    hole=0.3
+                )
+                fig_counts.update_layout(height=400)
+                st.plotly_chart(fig_counts, use_container_width=True)
+            
+            with col2:
+                # Soma dos valores por faixa
+                faixa_sums = df_distribuicao.groupby('faixa_valor')['VL_FOB'].sum()
+                
+                fig_sums = px.bar(
+                    x=faixa_sums.index,
+                    y=faixa_sums.values,
+                    title='💰 Valor Total por Faixa',
+                    labels={'x': 'Faixa de Valor', 'y': 'Valor Total (US$)'},
+                    color=faixa_sums.values,
+                    color_continuous_scale='Blues'
+                )
+                fig_sums.update_layout(height=400, xaxis_tickangle=45)
+                st.plotly_chart(fig_sums, use_container_width=True)
+        
+        # Análise 4: Insights Estatísticos
+        st.markdown("#### 🎯 Insights Estatísticos")
+        
+        insights_query = f"""
+        SELECT 
+            COUNT(*) as total_operacoes,
+            SUM(i.VL_FOB) as valor_total,
+            AVG(i.VL_FOB) as valor_medio,
+            MIN(i.VL_FOB) as valor_minimo,
+            MAX(i.VL_FOB) as valor_maximo,
+            AVG(i.KG_LIQUIDO) as peso_medio,
+            COUNT(DISTINCT i.COD_PAIS) as paises_unicos,
+            COUNT(DISTINCT i.COD_NCM) as ncms_unicos,
+            COUNT(DISTINCT i.COD_UF) as estados_unicos
+        FROM Importacoes i
+        LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF
+        LEFT JOIN Pais p ON i.COD_PAIS = p.COD_PAIS
+        {sql_filters if sql_filters else ''}
+        """
+        
+        df_insights = fetch_data(insights_query)
+        
+        if not df_insights.empty and len(df_insights) > 0:
+            insight = df_insights.iloc[0]
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "📊 Valor Médio por Operação",
+                    f"US$ {insight['valor_medio']:,.2f}"
+                )
+                st.metric(
+                    "📦 Peso Médio por Operação", 
+                    f"{insight['peso_medio']:,.1f} kg"
+                )
+            
+            with col2:
+                st.metric(
+                    "💰 Maior Importação",
+                    f"US$ {insight['valor_maximo']:,.2f}"
+                )
+                st.metric(
+                    "💸 Menor Importação",
+                    f"US$ {insight['valor_minimo']:,.2f}"
+                )
+            
+            with col3:
+                st.metric(
+                    "🌍 Diversidade de Países",
+                    f"{insight['paises_unicos']} países"
+                )
+                st.metric(
+                    "📦 Diversidade de Produtos",
+                    f"{insight['ncms_unicos']} NCMs"
+                )
+            
+            with col4:
+                concentracao_geografica = (insight['estados_unicos'] / 27) * 100  # 27 estados brasileiros
+                st.metric(
+                    "🏛️ Concentração Geográfica",
+                    f"{concentracao_geografica:.1f}% dos estados"
+                )
+                
+                # Calcular concentração de valor (Coeficiente de Gini simplificado)
+                if insight['total_operacoes'] > 100:
+                    concentracao_valor = (insight['valor_maximo'] / insight['valor_total']) * 100
+                    st.metric(
+                        "⚖️ Concentração de Valor",
+                        f"{concentracao_valor:.2f}%"
+                    )
+        
+        # Resumo dos insights
+        st.markdown("#### 📝 Resumo dos Insights")
+        
+        if not df_insights.empty:
+            insight = df_insights.iloc[0]
+            
+            st.markdown(f"""
+            **🔍 Principais Descobertas:**
+            
+            - **Volume de Negócios**: {insight['total_operacoes']:,} operações totalizando US$ {insight['valor_total']:,.2f}
+            - **Ticket Médio**: Operações com valor médio de US$ {insight['valor_medio']:,.2f}
+            - **Diversificação**: Importações de {insight['paises_unicos']} países diferentes com {insight['ncms_unicos']} produtos distintos
+            - **Abrangência Nacional**: Operações em {insight['estados_unicos']} estados brasileiros ({(insight['estados_unicos']/27)*100:.1f}% do país)
+            """)
+            
+            # Análise de concentração
+            if insight['valor_maximo'] / insight['valor_medio'] > 100:
+                st.warning("⚠️ **Alta Concentração**: Existe uma grande disparidade entre os valores das operações")
+            else:
+                st.success("✅ **Distribuição Equilibrada**: Os valores das operações são relativamente homogêneos")
+        
+        else:
+            st.warning("⚠️ Não foi possível gerar insights para os filtros selecionados")
       # Footer
     st.markdown("---")
     st.markdown("""
