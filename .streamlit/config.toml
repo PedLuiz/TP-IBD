@@ -4,7 +4,7 @@ developmentMode = false
 [server]
 port = 8501
 baseUrlPath = ""
-enableXsrfProtection = false
+enableXsrfProtection = true
 maxUploadSize = 200
 
 [browser]

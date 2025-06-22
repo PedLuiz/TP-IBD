@@ -159,7 +159,7 @@ def build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, per
 
 def main():
     # Header principal
-    st.markdown('<h1 class="main-header"> Dashboard de Importações Brasil 2024</h1>', 
+    st.markdown('<h1 class="main-header">Dashboard de Importações Brasil 2024</h1>', 
                 unsafe_allow_html=True)
     
     st.markdown("""
@@ -802,219 +802,46 @@ def main():
                 corr_matrix.values,
                 x=corr_matrix.columns,
                 y=corr_matrix.index,
-                title='🔥 Matriz de Correlação entre Variáveis',
+                title='Matriz de Correlação entre Variáveis',
                 color_continuous_scale='RdBu',
                 zmin=-1, zmax=1,
                 text_auto=True
             )
             fig_corr.update_layout(height=500)
             st.plotly_chart(fig_corr, use_container_width=True)
-              # Análises específicas com melhorias
-            st.markdown("#### 🔍 Análises de Correlação Detalhadas")
             
+            # Análises específicas
             col1, col2 = st.columns(2)
             
             with col1:
-                # Relação Valor x Peso com escala logarítmica
-                df_sample = df_corr.sample(n=min(2000, len(df_corr)))
-                
-                # Filtrar outliers extremos para melhor visualização
-                df_sample_clean = df_sample[
-                    (df_sample['peso_liquido'] > 0) & 
-                    (df_sample['valor_fob'] > 0) &
-                    (df_sample['peso_liquido'] < df_sample['peso_liquido'].quantile(0.98)) &
-                    (df_sample['valor_fob'] < df_sample['valor_fob'].quantile(0.98))
-                ]
-                
-                # Calcular preço por kg
-                df_sample_clean['preco_por_kg'] = df_sample_clean['valor_fob'] / df_sample_clean['peso_liquido']
+                # Relação Valor x Peso
+                df_sample = df_corr.sample(n=min(1000, len(df_corr)))
                 
                 fig_valor_peso = px.scatter(
-                    df_sample_clean,
+                    df_sample,
                     x='peso_liquido',
                     y='valor_fob',
-                    color='preco_por_kg',
                     title='💰 Valor FOB vs Peso Líquido',
-                    labels={
-                        'peso_liquido': 'Peso Líquido (kg)', 
-                        'valor_fob': 'Valor FOB (US$)',
-                        'preco_por_kg': 'Preço/kg (US$)'
-                    },
+                    labels={'peso_liquido': 'Peso Líquido (kg)', 'valor_fob': 'Valor FOB (US$)'},
                     opacity=0.6,
-                    hover_data=['preco_por_kg'],
-                    color_continuous_scale='viridis',
-                    log_x=True,
-                    log_y=True
+                    trendline="ols"
                 )
-                fig_valor_peso.update_layout(
-                    height=450,
-                    annotations=[
-                        dict(
-                            text="💡 Pontos mais à direita = produtos pesados<br>Pontos mais altos = produtos valiosos<br>Cores quentes = maior valor por kg",
-                            showarrow=False,
-                            xref="paper", yref="paper",
-                            x=0.02, y=0.98,
-                            xanchor="left", yanchor="top",
-                            font=dict(size=10, color="rgb(102, 102, 102)"),
-                            bgcolor="rgba(255,255,255,0.8)",
-                            bordercolor="#ccc",
-                            borderwidth=1
-                        )
-                    ]
-                )
+                fig_valor_peso.update_layout(height=400)
                 st.plotly_chart(fig_valor_peso, use_container_width=True)
             
             with col2:
-                # Relação Frete x Valor melhorada
-                df_frete_clean = df_sample[
-                    (df_sample['valor_frete'] > 0) & 
-                    (df_sample['valor_fob'] > 0) &
-                    (df_sample['valor_frete'] < df_sample['valor_frete'].quantile(0.95))
-                ]
-                
-                # Calcular percentual do frete
-                df_frete_clean['percentual_frete'] = (df_frete_clean['valor_frete'] / df_frete_clean['valor_fob']) * 100
-                
+                # Relação Frete x Valor
                 fig_frete_valor = px.scatter(
-                    df_frete_clean,
+                    df_sample,
                     x='valor_fob',
                     y='valor_frete',
-                    color='percentual_frete',
                     title='🚢 Valor do Frete vs Valor FOB',
-                    labels={
-                        'valor_fob': 'Valor FOB (US$)', 
-                        'valor_frete': 'Valor do Frete (US$)',
-                        'percentual_frete': 'Frete/FOB (%)'
-                    },
+                    labels={'valor_fob': 'Valor FOB (US$)', 'valor_frete': 'Valor do Frete (US$)'},
                     opacity=0.6,
-                    hover_data=['percentual_frete'],
-                    color_continuous_scale='plasma',
-                    log_x=True,
-                    log_y=True
+                    trendline="ols"
                 )
-                fig_frete_valor.update_layout(
-                    height=450,
-                    annotations=[
-                        dict(
-                            text="💡 Linha diagonal = frete proporcional ao valor<br>Pontos acima = frete relativamente alto<br>Cores quentes = maior % de frete",
-                            showarrow=False,
-                            xref="paper", yref="paper",
-                            x=0.02, y=0.98,
-                            xanchor="left", yanchor="top",
-                            font=dict(size=10, color="rgb(102, 102, 102)"),
-                            bgcolor="rgba(255,255,255,0.8)",
-                            bordercolor="#ccc",
-                            borderwidth=1
-                        )
-                    ]
-                )
-                
-                # Adicionar linha de referência (frete = 10% do valor FOB)
-                x_range = [df_frete_clean['valor_fob'].min(), df_frete_clean['valor_fob'].max()]
-                fig_frete_valor.add_scatter(
-                    x=x_range,
-                    y=[x * 0.1 for x in x_range],
-                    mode='lines',
-                    name='Referência: 10% FOB',
-                    line=dict(dash='dash', color='red', width=2),
-                    showlegend=True
-                )
-                
+                fig_frete_valor.update_layout(height=400)
                 st.plotly_chart(fig_frete_valor, use_container_width=True)
-            
-            # Análise adicional: Distribuição do percentual de frete
-            st.markdown("#### 📊 Análise do Percentual de Frete")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Histograma do percentual de frete
-                fig_hist_frete = px.histogram(
-                    df_frete_clean[df_frete_clean['percentual_frete'] <= 50],  # Limitar a 50% para melhor visualização
-                    x='percentual_frete',
-                    nbins=30,
-                    title='📈 Distribuição do Percentual de Frete sobre FOB',
-                    labels={'percentual_frete': 'Frete como % do Valor FOB', 'count': 'Frequência'},
-                    color_discrete_sequence=['#ff6b6b']
-                )
-                fig_hist_frete.add_vline(
-                    x=df_frete_clean['percentual_frete'].median(),
-                    line_dash="dash",
-                    line_color="blue",
-                    annotation_text=f"Mediana: {df_frete_clean['percentual_frete'].median():.1f}%"
-                )
-                fig_hist_frete.update_layout(height=350)
-                st.plotly_chart(fig_hist_frete, use_container_width=True)
-            
-            with col2:
-                # Box plot do percentual de frete por faixas de valor
-                df_frete_clean['faixa_valor'] = pd.cut(
-                    df_frete_clean['valor_fob'], 
-                    bins=[0, 1000, 10000, 100000, float('inf')],
-                    labels=['< US$ 1K', 'US$ 1K-10K', 'US$ 10K-100K', '> US$ 100K']
-                )
-                
-                fig_box_frete = px.box(
-                    df_frete_clean[df_frete_clean['percentual_frete'] <= 30],
-                    x='faixa_valor',
-                    y='percentual_frete',
-                    title='📦 % Frete por Faixa de Valor FOB',
-                    labels={'faixa_valor': 'Faixa de Valor FOB', 'percentual_frete': 'Frete (% do FOB)'},
-                    color='faixa_valor',
-                    color_discrete_sequence=['#74b9ff', '#0984e3', '#6c5ce7', '#fd79a8']
-                )
-                fig_box_frete.update_layout(height=350, showlegend=False)
-                st.plotly_chart(fig_box_frete, use_container_width=True)            # Mostrar insights automáticos
-            st.markdown("#### 🧠 Insights Automáticos")
-            
-            if not df_corr.empty:
-                # Calcular algumas estatísticas interessantes
-                correlacao_valor_peso = df_corr['valor_fob'].corr(df_corr['peso_liquido'])
-                correlacao_frete_valor = df_corr['valor_frete'].corr(df_corr['valor_fob'])
-                
-                frete_medio_percentual = (df_frete_clean['percentual_frete'].median() if 'df_frete_clean' in locals() else 0)
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.metric(
-                        "🔗 Correlação Valor-Peso",
-                        f"{correlacao_valor_peso:.3f}",
-                        help="Correlação entre valor FOB e peso. Valores próximos de 1 indicam que produtos mais pesados tendem a ser mais valiosos."
-                    )
-                
-                with col2:
-                    st.metric(
-                        "🚚 Correlação Frete-Valor", 
-                        f"{correlacao_frete_valor:.3f}",
-                        help="Correlação entre frete e valor FOB. Valores altos indicam que produtos mais valiosos têm fretes proporcionalmente maiores."
-                    )
-                
-                with col3:
-                    st.metric(
-                        "📊 Frete Médio (%)",
-                        f"{frete_medio_percentual:.1f}%",
-                        help="Percentual mediano do frete em relação ao valor FOB das importações."
-                    )
-                
-                # Insights textuais
-                insights = []
-                
-                if correlacao_valor_peso > 0.5:
-                    insights.append("✅ **Alta correlação valor-peso:** Produtos mais pesados tendem a ser mais valiosos")
-                elif correlacao_valor_peso < 0.1:
-                    insights.append("⚠️ **Baixa correlação valor-peso:** Peso não é um bom indicador de valor (produtos de alta densidade de valor)")
-                
-                if frete_medio_percentual > 15:
-                    insights.append("🚛 **Frete alto:** Custos de transporte representam parcela significativa do valor")
-                elif frete_medio_percentual < 5:
-                    insights.append("✈️ **Frete baixo:** Produtos de alto valor ou transporte eficiente")
-                
-                if correlacao_frete_valor > 0.8:
-                    insights.append("📈 **Frete proporcional:** Custos de frete crescem proporcionalmente ao valor")                
-                if insights:
-                    for insight in insights:
-                        st.markdown(f"• {insight}")
         
         # Análise de outliers
         st.markdown("#### 🎯 Análise de Outliers")
@@ -1077,8 +904,8 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style="text-align: center; padding: 1rem; background-color: #f0f2f6; border-radius: 10px;">
-        <p style="margin: 0; color: rgb(102, 102, 102);">
-            Dashboard desenvolvido para análise dos dados de importações brasileiras 2024<br>
+        <p style="margin: 0; color: #666;">
+            📊 Dashboard desenvolvido para análise dos dados de importações brasileiras 2024<br>
             🔗 Fonte: Comex Stat - Balança Comercial | 
             👥 Desenvolvido por: Daniel da Cunha Costa, Isaac Reyes Alves de Abreu, Pedro Luiz Silva
         </p>
