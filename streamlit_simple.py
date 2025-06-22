@@ -203,9 +203,10 @@ def main():
         index=0,
         help="Filtrar operações por valor mínimo para focar em grandes importações"
     )
+      # Estatísticas gerais
+    st.markdown("## 📈 Visão Geral")
     
-    # Estatísticas gerais
-    st.markdown("## 📈 Visão Geral")    # Construir filtros SQL simples
+    # Construir filtros SQL simples
     sql_filters = build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo)
     
     # Mostrar filtros aplicados
@@ -219,9 +220,6 @@ def main():
     
     if filtros_ativos:
         st.info(f"🔍 **Filtros Aplicados:** {' • '.join(filtros_ativos)}")
-    
-    # Debug SQL
-    st.write(f"**Debug SQL:** `{sql_filters if sql_filters else 'Sem filtros'}`")
     
     stats = get_basic_stats(sql_filters)
     if stats:
@@ -286,20 +284,21 @@ def main():
         LEFT JOIN UF uf ON i.COD_UF = uf.COD_UF
         {sql_filters}
         GROUP BY m.COD_MES, m.NOME_MES
-        ORDER BY m.COD_MES
-        """
-        
-        st.write("**Query Temporal:**")
-        st.code(temporal_query)
+        ORDER BY m.COD_MES        """
         
         df_temporal = fetch_data(temporal_query)
         
-        # Debug
-        st.write(f"📊 **Debug Temporal:** {len(df_temporal)} registros encontrados")
-        
         if not df_temporal.empty:
-            st.write("**Dados encontrados:**")
-            st.dataframe(df_temporal)
+            st.markdown("#### 📈 Dados Mensais")
+            
+            # Exibir resumo dos dados
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Meses com Dados", len(df_temporal))
+            with col2:
+                st.metric("Valor Total Período", f"US$ {df_temporal['valor_total'].sum():,.0f}")
+            
+            st.markdown("#### 📊 Visualizações")
             
             # Gráfico simples de valor total
             fig = px.line(df_temporal, x='NOME_MES', y='valor_total', 
@@ -332,20 +331,23 @@ def main():
         {sql_filters}
         GROUP BY p.COD_PAIS, p.NOME_PAIS
         ORDER BY valor_total DESC
-        LIMIT 10
-        """
-        
-        st.write("**Query Países:**")
-        st.code(paises_query)
+        LIMIT 10        """
         
         df_paises = fetch_data(paises_query)
         
-        # Debug
-        st.write(f"🌍 **Debug Países:** {len(df_paises)} registros encontrados")
-        
         if not df_paises.empty:
-            st.write("**Top 10 Países:**")
-            st.dataframe(df_paises)
+            st.markdown("#### 🏆 Top 10 Países por Valor de Importação")
+            
+            # Métricas resumo
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Países Representados", len(df_paises))
+            with col2:
+                st.metric("Maior Importador", df_paises.iloc[0]['NOME_PAIS'])
+            with col3:
+                st.metric("Valor do Líder", f"US$ {df_paises.iloc[0]['valor_total']:,.0f}")
+            
+            st.markdown("#### 📊 Visualizações")
             
             # Gráfico de barras horizontal
             fig = px.bar(df_paises, x='valor_total', y='NOME_PAIS', 
@@ -378,20 +380,23 @@ def main():
         {sql_filters}
         GROUP BY uf.COD_UF, uf.NOME_UF, uf.SIGLA_UF
         ORDER BY valor_total DESC
-        LIMIT 15
-        """
-        
-        st.write("**Query Estados:**")
-        st.code(estados_query)
+        LIMIT 15        """
         
         df_estados = fetch_data(estados_query)
         
-        # Debug
-        st.write(f"🏛️ **Debug Estados:** {len(df_estados)} registros encontrados")
-        
         if not df_estados.empty:
-            st.write("**Top 15 Estados:**")
-            st.dataframe(df_estados)
+            st.markdown("#### 🏛️ Top 15 Estados por Valor de Importação")
+            
+            # Métricas resumo
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Estados Representados", len(df_estados))
+            with col2:
+                st.metric("Estado Líder", f"{df_estados.iloc[0]['SIGLA_UF']} - {df_estados.iloc[0]['NOME_UF']}")
+            with col3:
+                st.metric("Valor do Líder", f"US$ {df_estados.iloc[0]['valor_total']:,.0f}")
+            
+            st.markdown("#### 📊 Visualizações")
             
             # Gráfico de barras
             fig = px.bar(df_estados, x='SIGLA_UF', y='valor_total', 
@@ -429,31 +434,37 @@ def main():
         {sql_filters}
         GROUP BY n.COD_NCM, n.NOME_NCM, u.NOME_UNID, u.SIGLA_UNID
         ORDER BY valor_total DESC
-        LIMIT 15
-        """
-        
-        st.write("**Query NCMs:**")
-        st.code(ncm_query)
+        LIMIT 15        """
         
         df_ncm = fetch_data(ncm_query)
         
-        # Debug
-        st.write(f"📦 **Debug NCMs:** {len(df_ncm)} registros encontrados")
-        
         if not df_ncm.empty:
-            st.write("**Top 15 NCMs:**")
+            st.markdown("#### 📦 Top 15 Produtos por Código NCM")
+            
+            # Métricas resumo
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("NCMs Representados", len(df_ncm))
+            with col2:
+                produto_lider = df_ncm.iloc[0]['NOME_NCM'][:40] + "..." if len(df_ncm.iloc[0]['NOME_NCM']) > 40 else df_ncm.iloc[0]['NOME_NCM']
+                st.metric("Produto Líder", produto_lider)
+            with col3:
+                st.metric("Valor do Líder", f"US$ {df_ncm.iloc[0]['valor_total']:,.0f}")
+            
+            st.markdown("#### 📋 Dados Detalhados")
             
             # Truncar nomes muito longos para visualização
             df_ncm['NOME_NCM_SHORT'] = df_ncm['NOME_NCM'].apply(
                 lambda x: x[:50] + '...' if len(str(x)) > 50 else x
             )
-            
-            # Mostrar tabela
+              # Mostrar tabela
             df_display = df_ncm[['COD_NCM', 'NOME_NCM_SHORT', 'SIGLA_UNID', 'total_operacoes', 'valor_total', 'valor_medio']].copy()
             df_display['valor_total'] = df_display['valor_total'].apply(lambda x: f"US$ {x:,.0f}")
             df_display['valor_medio'] = df_display['valor_medio'].apply(lambda x: f"US$ {x:,.0f}")
             df_display.columns = ['Código NCM', 'Produto', 'Unidade', 'Operações', 'Valor Total', 'Valor Médio']
             st.dataframe(df_display, use_container_width=True)
+            
+            st.markdown("#### 📊 Visualizações")
             
             # Gráfico de barras horizontal
             fig = px.bar(df_ncm.head(10), x='valor_total', y='NOME_NCM_SHORT', 
@@ -484,6 +495,16 @@ def main():
                 st.plotly_chart(fig_hist, use_container_width=True)
         else:
             st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados")
+
+    # Footer
+    st.markdown("---")
+    st.markdown("""
+    <div style="text-align: center; padding: 2rem; color: #666;">
+        <h4>📊 Dashboard de Importações Brasil 2024</h4>
+        <p>Dados baseados em registros oficiais de importações brasileiras • Análise por NCM, País, Estado e Período</p>
+        <p><em>Desenvolvido com Streamlit, Plotly e SQLite</em></p>
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
