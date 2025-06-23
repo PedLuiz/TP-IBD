@@ -67,7 +67,7 @@ def fetch_data(query):
         st.error(f"Erro ao executar query: {e}")
         return pd.DataFrame()
 
-def build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, pais_selecionado):
+def build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, paises_selecionados):
     """Constrói filtros SQL baseados nas seleções do usuário"""
     filters = []
     
@@ -109,11 +109,12 @@ def build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, pai
     elif valor_minimo == "Acima de US$ 1.000.000":
         filters.append("i.VL_FOB >= 1000000")
     
-    # Filtro de país
-    if pais_selecionado != "Todos os países":
-        # Escapar aspas simples no nome do país
-        pais_escaped = pais_selecionado.replace("'", "''")
-        filters.append(f"p.NOME_PAIS = '{pais_escaped}'")
+    # Filtro de países (seleção múltipla)
+    if paises_selecionados and len(paises_selecionados) > 0:
+        # Escapar aspas simples nos nomes dos países
+        paises_escaped = [pais.replace("'", "''") for pais in paises_selecionados]
+        paises_str = "', '".join(paises_escaped)
+        filters.append(f"p.NOME_PAIS IN ('{paises_str}')")
     
     # Retornar filtros
     if filters:
@@ -206,27 +207,51 @@ def main():
         options=["Todos os valores", "Acima de US$ 1.000", "Acima de US$ 10.000", "Acima de US$ 100.000", "Acima de US$ 1.000.000"],
         index=0,
         help="Filtrar operações por valor mínimo para focar em grandes importações"
-    )
-    
-    # Filtro de países (carregar dinamicamente)
+    )    # Filtro de países (seleção múltipla)
     @st.cache_data
     def get_countries():
         query = "SELECT DISTINCT p.NOME_PAIS FROM Pais p JOIN Importacoes i ON p.COD_PAIS = i.COD_PAIS ORDER BY p.NOME_PAIS"
         return fetch_data(query)
     
     df_countries = get_countries()
-    countries_list = ["Todos os países"] + df_countries['NOME_PAIS'].tolist() if not df_countries.empty else ["Todos os países"]
+    countries_list = df_countries['NOME_PAIS'].tolist() if not df_countries.empty else []
     
-    pais_selecionado = st.sidebar.selectbox(
-        "🌍 País de Origem",
+    paises_selecionados = st.sidebar.multiselect(
+        "🌍 Países de Origem",
         options=countries_list,
-        index=0,
-        help="Filtrar importações por país de origem específico"
+        default=[],
+        help="Selecione um ou mais países de origem. Deixe vazio para incluir todos os países."
     )
-      # Estatísticas gerais
+    
+    # Botões de seleção rápida para grupos de países
+    st.sidebar.markdown("**🔗 Seleção Rápida:**")
+    col1, col2 = st.sidebar.columns(2)
+    
+    with col1:
+        if st.button("🇺🇸 Principais", key="principais"):
+            # Top países por volume (estimativa)
+            principais = [p for p in ["CHINA", "ESTADOS UNIDOS", "ARGENTINA", "ALEMANHA", "COREIA DO SUL"] if p in countries_list]
+            if principais:
+                paises_selecionados = principais
+                st.rerun()
+    
+    with col2:
+        if st.button("🌎 Mercosul", key="mercosul"):
+            mercosul = [p for p in ["ARGENTINA", "PARAGUAI", "URUGUAI", "BRASIL"] if p in countries_list]
+            if mercosul:
+                paises_selecionados = mercosul
+                st.rerun()
+    
+    # Mostrar países selecionados
+    if paises_selecionados:
+        st.sidebar.success(f"✅ {len(paises_selecionados)} país(es) selecionado(s)")
+        if st.sidebar.button("🗑️ Limpar Seleção"):
+            paises_selecionados = []
+            st.rerun()    # Estatísticas gerais
     st.markdown("## 📈 Visão Geral")
-      # Construir filtros SQL simples
-    sql_filters = build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, pais_selecionado)
+    
+    # Construir filtros SQL simples
+    sql_filters = build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, paises_selecionados)
     
     # Mostrar filtros aplicados
     filtros_ativos = []
@@ -236,8 +261,13 @@ def main():
         filtros_ativos.append(regiao_selecionada)
     if valor_minimo != "Todos os valores":
         filtros_ativos.append(valor_minimo)
-    if pais_selecionado != "Todos os países":
-        filtros_ativos.append(f"País: {pais_selecionado}")
+    if paises_selecionados and len(paises_selecionados) > 0:
+        if len(paises_selecionados) == 1:
+            filtros_ativos.append(f"País: {paises_selecionados[0]}")
+        elif len(paises_selecionados) <= 3:
+            filtros_ativos.append(f"Países: {', '.join(paises_selecionados)}")
+        else:
+            filtros_ativos.append(f"Países: {', '.join(paises_selecionados[:2])} e mais {len(paises_selecionados)-2}")
     
     if filtros_ativos:
         st.info(f"🔍 **Filtros Aplicados:** {' • '.join(filtros_ativos)}")
