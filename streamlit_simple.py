@@ -215,42 +215,26 @@ def main():
     
     df_countries = get_countries()
     countries_list = df_countries['NOME_PAIS'].tolist() if not df_countries.empty else []
-    
+      # Widget multiselect simples para países
     paises_selecionados = st.sidebar.multiselect(
         "🌍 Países de Origem",
         options=countries_list,
         default=[],
-        help="Selecione um ou mais países de origem. Deixe vazio para incluir todos os países."
+        help="Selecione um ou mais países de origem para filtrar as análises."
     )
-    
-    # Botões de seleção rápida para grupos de países
-    st.sidebar.markdown("**🔗 Seleção Rápida:**")
-    col1, col2 = st.sidebar.columns(2)
-    
-    with col1:
-        if st.button("🇺🇸 Principais", key="principais"):
-            # Top países por volume (estimativa)
-            principais = [p for p in ["CHINA", "ESTADOS UNIDOS", "ARGENTINA", "ALEMANHA", "COREIA DO SUL"] if p in countries_list]
-            if principais:
-                paises_selecionados = principais
-                st.rerun()
-    
-    with col2:
-        if st.button("🌎 Mercosul", key="mercosul"):
-            mercosul = [p for p in ["ARGENTINA", "PARAGUAI", "URUGUAI", "BRASIL"] if p in countries_list]
-            if mercosul:
-                paises_selecionados = mercosul
-                st.rerun()
     
     # Mostrar países selecionados
     if paises_selecionados:
         st.sidebar.success(f"✅ {len(paises_selecionados)} país(es) selecionado(s)")
-        if st.sidebar.button("🗑️ Limpar Seleção"):
-            paises_selecionados = []
-            st.rerun()    # Estatísticas gerais
+        # Mostrar os nomes dos países se não forem muitos
+        if len(paises_selecionados) <= 5:
+            st.sidebar.write(f"**Países:** {', '.join(paises_selecionados)}")
+        else:
+            st.sidebar.write(f"**Países:** {', '.join(paises_selecionados[:3])} e mais {len(paises_selecionados)-3}")
+    else:
+        st.sidebar.info("ℹ️ Nenhum país específico selecionado (todos incluídos)")# Estatísticas gerais
     st.markdown("## 📈 Visão Geral")
-    
-    # Construir filtros SQL simples
+      # Construir filtros SQL simples
     sql_filters = build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, paises_selecionados)
     
     # Mostrar filtros aplicados
@@ -271,6 +255,8 @@ def main():
     
     if filtros_ativos:
         st.info(f"🔍 **Filtros Aplicados:** {' • '.join(filtros_ativos)}")
+    else:
+        st.info("🌎 **Visualizando:** Todos os dados disponíveis (Brasil completo, 2024, todos os países)")
     
     stats = get_basic_stats(sql_filters)
     if stats:
