@@ -47,6 +47,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Funções auxiliares
+@st.cache_resource
 def get_connection():
     """Conecta ao banco SQLite"""
     try:
@@ -56,6 +57,7 @@ def get_connection():
         st.error(f"Erro ao conectar ao banco de dados: {e}")
         return None
 
+@st.cache_data
 def fetch_data(query):
     """Executa query e retorna DataFrame"""
     try:
@@ -121,6 +123,7 @@ def build_sql_filters(periodo_selecionado, regiao_selecionada, valor_minimo, pai
         return "WHERE " + " AND ".join(filters)
     return ""
 
+@st.cache_data
 def get_basic_stats(sql_filters=""):
     """Retorna estatísticas básicas do banco com filtros opcionais"""
     try:
